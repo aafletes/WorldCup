@@ -231,19 +231,29 @@ tr.row-live:hover{background:rgba(34,197,94,0.06)!important;}
 /* ROSTERS */
 .rosters-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;}
 .roster-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;}
-.roster-head{background:var(--surface2);padding:12px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);}
+.roster-head{background:var(--surface2);padding:10px 14px;display:flex;align-items:flex-start;justify-content:space-between;gap:8px;border-bottom:1px solid var(--border);min-height:56px;}
+.roster-head-left{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding-top:2px;}
+.roster-head-right{display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0;min-height:40px;}
 .roster-name{font-weight:700;font-size:0.95rem;}
+.roster-gp{font-size:0.62rem;font-weight:700;color:var(--muted);background:var(--surface3);padding:1px 6px;border-radius:999px;}
 .roster-score{font-size:1.2rem;font-weight:800;color:var(--gold);}
 .roster-body{padding:4px 0;}
 .roster-row{display:flex;align-items:center;justify-content:space-between;padding:8px 14px;border-bottom:1px solid rgba(255,255,255,0.04);}
 .roster-row:last-child{border-bottom:none;}
+.roster-row.row-team-live{background:rgba(34,197,94,0.04);}
 .roster-left{display:flex;align-items:center;gap:6px;}
+.roster-right{display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0;}
 .roster-flag{width:20px;height:15px;object-fit:cover;border-radius:2px;flex-shrink:0;}
 .roster-rank{font-size:0.62rem;font-weight:700;color:var(--muted);white-space:nowrap;flex-shrink:0;}
+.roster-team-info{display:flex;flex-direction:column;gap:1px;min-width:0;}
 .roster-team-name{font-size:0.85rem;font-weight:500;}
 .roster-team-name.name-long{font-size:0.7rem;}
+.roster-record{font-size:0.58rem;font-weight:700;color:var(--muted);letter-spacing:0.02em;white-space:nowrap;}
 .roster-pts{font-size:0.88rem;font-weight:700;}
 .pts-pos{color:var(--green);} .pts-zero{color:var(--muted);}
+.roster-live-dot{color:var(--green);font-size:0.6rem;margin-left:3px;animation:pulse 1.5s infinite;}
+.roster-proj{font-size:0.6rem;font-weight:700;color:var(--green);}
+.card-live{border-color:rgba(34,197,94,0.3)!important;}
 
 /* GROUPS */
 .groups-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;padding:4px 0 16px;}
@@ -771,6 +781,33 @@ const STAGE_PTS = {
 };
 
 function isDouble(n){const t=TMAP[n];return t&&t.tier>=3;}
+
+// W/D/L record for a team across all completed matches
+function teamRecord(name){
+  let w=0,d=0,l=0;
+  for(const m of state.matches){
+    const isH=m.home===name,isA=m.away===name;
+    if(!isH&&!isA) continue;
+    if(m.stage==="group"){
+      if(m.hs>m.as){isH?w++:l++;}
+      else if(m.hs<m.as){isA?w++:l++;}
+      else d++;
+    } else {
+      if(m.hs>m.as){isH?w++:l++;}
+      else{isA?w++:l++;}
+    }
+  }
+  return {w,d,l,gp:w+d+l};
+}
+
+function entryGamesPlayed(entry){
+  const teams=[...entry.random,...entry.wc.filter(Boolean)];
+  return teams.reduce((s,t)=>s+teamRecord(t).gp,0);
+}
+
+function teamIsLive(name){
+  return !!(scheduleData&&scheduleData.some(m=>m.status==="live"&&(m.homeName===name||m.awayName===name)));
+}
 
 // Points from confirmed (final) matches only
 function confirmedPts(name){
@@ -1369,40 +1406,72 @@ function renderResults(){
 // ================================================================
 function renderRosters(){
   const lb=buildLeaderboard();
+
+  function teamRow(name, chipHtml){
+    const t=TMAP[name]||{};
+    const pts=teamPts(name);
+    const dbl=isDouble(name);
+    const lp=livePts(name);
+    const live=teamIsLive(name);
+    const cc=CC[name];
+    const flagImg=cc?`<img src="https://flagcdn.com/20x15/${cc}.png" class="roster-flag" alt="${name}">`:"";
+    const rankBadge=t.rank?`<span class="roster-rank">#${t.rank}</span>`:"";
+    const rec=teamRecord(name);
+    const recHtml=rec.gp>0?`<span class="roster-record">${rec.w}W · ${rec.d}D · ${rec.l}L</span>`:"";
+    const nameCls=name.length>14?" name-long":"";
+    const liveDot=live?`<span class="roster-live-dot">●</span>`:"";
+    const projHtml=live&&lp>0?`<span class="roster-proj">+${lp} proj</span>`:"";
+    return `<div class="roster-row${live?" row-team-live":""}">
+      <div class="roster-left">
+        ${chipHtml}
+        ${flagImg}${rankBadge}
+        <div class="roster-team-info">
+          <span class="roster-team-name${nameCls}">${name}${dbl?' <span class="chip-2x">2×</span>':''}${name===state.champion?' 🏆':''}</span>
+          ${recHtml}
+        </div>
+      </div>
+      <div class="roster-right">
+        <span class="roster-pts ${pts>0?'pts-pos':'pts-zero'}">${pts} pts${liveDot}</span>
+        ${projHtml}
+      </div>
+    </div>`;
+  }
+
   let html="";
   for(const e of lb){
+    const gp=entryGamesPlayed(e);
+    const isLive=entryHasLive(e);
+    const delta=isLive?entryLiveDelta(e):0;
+    const liveBadge=isLive?`<span class="live-badge">● LIVE</span>`:"";
+    // Always render proj line (hidden when 0) so every header is the same height
+    const liveDeltaHtml=`<span class="live-delta"${delta>0?'':' style="visibility:hidden"'}>${delta>0?'+'+delta+' proj':'+0 proj'}</span>`;
+    const gpHtml=`<span class="roster-gp">${gp} GP</span>`;
+
     const rows=[
       ...e.random.map(n=>{
-        const t=TMAP[n]||{};const pts=teamPts(n);const dbl=isDouble(n);
-        const cc=CC[n];const flagImg=cc?`<img src="https://flagcdn.com/20x15/${cc}.png" class="roster-flag" alt="${n}">` :"";
-        const rankBadge=t.rank?`<span class="roster-rank">#${t.rank}</span>`:"";
-        return `<div class="roster-row">
-          <div class="roster-left">
-            <span class="${chipCls(t.tier||1)}">${tierLbl(t.tier||1)}</span>
-            ${flagImg}${rankBadge}<span class="roster-team-name${n.length>14?' name-long':''}">${n}${dbl?' <span class="chip-2x">2×</span>':''}${n===state.champion?' 🏆':''}</span>
-          </div>
-          <span class="roster-pts ${pts>0?'pts-pos':'pts-zero'}">${pts} pts</span>
-        </div>`;
+        const t=TMAP[n]||{};
+        return teamRow(n,`<span class="${chipCls(t.tier||1)}">${tierLbl(t.tier||1)}</span>`);
       }),
       ...e.wc.map((w,i)=>{
         if(!w) return `<div class="roster-row">
           <div class="roster-left"><span class="chip chip-wc">WC${i+1}</span><span class="roster-team-name" style="color:var(--muted);font-style:italic;">Not set</span></div>
-          <span class="roster-pts pts-zero">—</span>
+          <div class="roster-right"><span class="roster-pts pts-zero">—</span></div>
         </div>`;
-        const tw=TMAP[w]||{};const pts=teamPts(w);const dbl=isDouble(w);
-        const cc=CC[w];const flagImg=cc?`<img src="https://flagcdn.com/20x15/${cc}.png" class="roster-flag" alt="${w}">` :"";
-        const rankBadge=tw.rank?`<span class="roster-rank">#${tw.rank}</span>`:"";
-        return `<div class="roster-row">
-          <div class="roster-left">
-            <span class="chip chip-wc">WC${i+1}</span>
-            ${flagImg}${rankBadge}<span class="roster-team-name">${w}${dbl?' <span class="chip-2x">2×</span>':''}${w===state.champion?' 🏆':''}</span>
-          </div>
-          <span class="roster-pts ${pts>0?'pts-pos':'pts-zero'}">${pts} pts</span>
-        </div>`;
+        return teamRow(w,`<span class="chip chip-wc">WC${i+1}</span>`);
       }),
     ].join("");
-    html+=`<div class="roster-card">
-      <div class="roster-head"><span class="roster-name">${e.name}</span><span class="roster-score">${e.total}</span></div>
+
+    html+=`<div class="roster-card${isLive?' card-live':''}">
+      <div class="roster-head">
+        <div class="roster-head-left">
+          <span class="roster-name">${e.name}</span>
+          ${gpHtml}${liveBadge}
+        </div>
+        <div class="roster-head-right">
+          <span class="roster-score">${e.total}</span>
+          ${liveDeltaHtml}
+        </div>
+      </div>
       <div class="roster-body">${rows}</div>
     </div>`;
   }
